@@ -41,27 +41,39 @@ team_t team = {
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
 
-// F9.43 macros
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
 
+// 싱글 워드 크기, 4바이트
 #define WSIZE             4
+// 더블 워드 크기, 8바이트
 #define DSIZE             8
+// mm_init 호출 시 최초로 할당하는 크기, 4096바이트
 #define CHUNKSIZE         (1<<12)
 
+// 둘 중에 더 큰 값
 #define MAX(x, y)         ((x) > (y) ? (x) : (y))
 
+// 헤더를 구성, alloc은 0 또는 1
 #define PACK(size, alloc) ((size) | (alloc))
 
+// 이 포인터의 헤더 정보를 구함
 #define GET(p)            (*(unsigned int *)(p))
+// 이 포인터의 헤더 정보를 덮어씀, 보통 PACK과 같이 쓰임
 #define PUT(p, val)       (*(unsigned int *)(p) = val)
 
+// 헤더에서 블록 크기를 구함
 #define GET_SIZE(p)       (GET(p) & ~0x7)
+// 헤더에서 할당 바이트를 구함
 #define GET_ALLOC(p)      (GET(p) & 0x1)
 
+// 블록 포인터로부터 헤더 포인터를 구함
 #define HDRP(bp)          ((char *)(bp) - WSIZE)
+// 블록 포인터로부터 풋터 포인터를 구함
 #define FTRP(bp)          ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
 
+// 블록 포인터로부터 다음 블록의 위치를 구함
 #define NEXT_BLKP(bp)     ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
+// 블록 포인터로부터 이전 블록의 위치를 구함
 #define PREV_BLKP(bp)     ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 
 // 824페이지에서 나온 "한 개의 정적(static) 전역변수"
@@ -90,34 +102,71 @@ int mm_init(void)
 }
 
 // F9.45
-// 86째 줄에서 가용 공간을 늘리려고 호출하는 그 함수
+// mm_init에서 가용 공간을 늘리려고 호출하는 그 함수
 static void *extend_heap(size_t words)
 {
+    char *bp;
+    size_t size;
+
+    size = (words%2) ? (words+1) * WSIZE : words * WSIZE;
+    if ((long)(bp = mem_sbrk(size)) == -1L) {
+        return NULL;
+    }
+
+    PUT(HDRP(bp), PACK(size, 1));
+    PUT(FTRP(bp), PACK(size, 1));
+    PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
     
+    return coalesce(bp);
 }
 
 /*
  * mm_free - Freeing a block does nothing.
  */
-void mm_free(void *ptr)
+
+// naive 방식에서는 아무것도 안하는 이 함수를
+// 할당 비트를 0으로 맞추고 경계태그 연결 함수(coalesce)를 써서 가용 공간을 최대한 늘려야 함
+void mm_free(void *bp)
 {
     
+}
+
+// 경계태그 연결 함수, 사실상 묵시적 가용 리스트 방식의 하이라이트
+static void *coalesce(void *bp)
+{
+
+}
+
+// 연습문제 9.8, first fit 검색을 수행하는 함수
+static void *find_fit(size_t asize)
+{
+
+}
+
+// 연습문제 9.9, 블록을 실제로 배치하는 함수
+// 요청한 블록을 가용 블록의 시작 부분에 배치해야 하며, 남은 부분의 크기가 최소 블록 크기와 같거나 큰 경우에만 분할
+static void *place(void *bp, size_t asize)
+{
+
 }
 
 /* 
  * mm_malloc - Allocate a block by incrementing the brk pointer.
  *     Always allocate a block whose size is a multiple of the alignment.
  */
+
+// naive 방식에서는 단순히 mem_sbrk 함수를 호출하는 이 함수를
+// 가용 블록을 찾고 여기를 할당했다고 표시해야 함
 void *mm_malloc(size_t size)
 {
-    int newsize = ALIGN(size + SIZE_T_SIZE);
-    void *p = mem_sbrk(newsize);
-    if (p == (void *)-1)
-	return NULL;
-    else {
-        *(size_t *)p = size;
-        return (void *)((char *)p + SIZE_T_SIZE);
-    }
+    // int newsize = ALIGN(size + SIZE_T_SIZE);
+    // void *p = mem_sbrk(newsize);
+    // if (p == (void *)-1)
+	// return NULL;
+    // else {
+    //     *(size_t *)p = size;
+    //     return (void *)((char *)p + SIZE_T_SIZE);
+    // }
 }
 
 /*
