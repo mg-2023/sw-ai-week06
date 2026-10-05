@@ -38,9 +38,6 @@ team_t team = {
 /* single word (4) or double word (8) alignment */
 #define ALIGNMENT 8
 
-/* rounds up to the nearest multiple of ALIGNMENT */
-#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
-
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
 
 // 싱글 워드 크기, 4바이트
@@ -49,6 +46,8 @@ team_t team = {
 #define DSIZE             8
 // mm_init 호출 시 최초로 할당하는 크기, 4096바이트
 #define CHUNKSIZE         (1<<12)
+// 풋터까지 쓰기 때문에 2*DSIZE - 1을 더하고 뒤의 3비트를 날려야 함
+#define ALIGN(size) (((size) + (DSIZE) + (DSIZE-1)) & ~0x7)
 
 // 둘 중에 더 큰 값
 #define MAX(x, y)         ((x) > (y) ? (x) : (y))
@@ -79,26 +78,55 @@ team_t team = {
 // 824페이지에서 나온 "한 개의 정적(static) 전역변수"
 static char *heap_listp = 0;
 
-/* 
- * mm_init - initialize the malloc package.
- */
-// F9.44
-// 묵시적 가용 리스트의 불변하는 형식 초기화
-int mm_init(void)
-{
-    if (heap_listp = mem_sbrk(4*WSIZE) == (void*)-1) {
-        return -1;
+// asize를 구하는 함수
+size_t get_asize(size_t size) {
+    size_t asize;
+    if (size <= DSIZE) {
+        asize = 2*DSIZE;
     }
-    PUT(heap_listp, 0);
-    PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));
-    PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
-    PUT(heap_listp + (3*WSIZE), PACK(0, 1));
-    heap_listp += (2*WSIZE);
 
-    if (extend_heap(CHUNKSIZE / WSIZE) == NULL) {
-        return -1;
+    else {
+        asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
     }
-    return 0;
+
+    return asize;
+}
+
+// 경계태그 연결 함수, 사실상 묵시적 가용 리스트 방식의 하이라이트
+static void *coalesce(void *bp)
+{
+    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
+    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+
+    size_t size = GET_SIZE(HDRP(bp));
+    size_t prev_size = GET_SIZE(HDRP(PREV_BLKP(bp)));
+    size_t next_size = GET_SIZE(HDRP(NEXT_BLKP(bp)));
+
+    if (prev_alloc && next_alloc) {
+        return bp;
+    }
+
+    else if (prev_alloc && !next_alloc) {
+        size += next_size;
+        PUT(HDRP(bp), PACK(size, 0));
+        PUT(FTRP(bp), PACK(size, 0));
+    }
+    
+    else if (!prev_alloc && next_alloc) {
+        size += prev_size;
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        PUT(FTRP(bp), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    }
+
+    else {
+        size += (prev_size + next_size);
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    }
+
+    return bp;
 }
 
 // F9.45
@@ -113,11 +141,33 @@ static void *extend_heap(size_t words)
         return NULL;
     }
 
-    PUT(HDRP(bp), PACK(size, 1));
-    PUT(FTRP(bp), PACK(size, 1));
+    PUT(HDRP(bp), PACK(size, 0));
+    PUT(FTRP(bp), PACK(size, 0));
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
     
     return coalesce(bp);
+}
+
+/* 
+ * mm_init - initialize the malloc package.
+ */
+// F9.44
+// 묵시적 가용 리스트의 불변하는 형식 초기화
+int mm_init(void)
+{
+    if ((heap_listp = mem_sbrk(4*WSIZE)) == (void*)-1) {
+        return -1;
+    }
+    PUT(heap_listp, 0);
+    PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));
+    PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
+    PUT(heap_listp + (3*WSIZE), PACK(0, 1));
+    heap_listp += (2*WSIZE);
+
+    if (extend_heap(CHUNKSIZE / WSIZE) == NULL) {
+        return -1;
+    }
+    return 0;
 }
 
 /*
@@ -128,26 +178,50 @@ static void *extend_heap(size_t words)
 // 할당 비트를 0으로 맞추고 경계태그 연결 함수(coalesce)를 써서 가용 공간을 최대한 늘려야 함
 void mm_free(void *bp)
 {
-    
-}
+    size_t size = GET_SIZE(HDRP(bp));
 
-// 경계태그 연결 함수, 사실상 묵시적 가용 리스트 방식의 하이라이트
-static void *coalesce(void *bp)
-{
-
+    PUT(HDRP(bp), PACK(size, 0));
+    PUT(FTRP(bp), PACK(size, 0));
+    coalesce(bp);
 }
 
 // 연습문제 9.8, first fit 검색을 수행하는 함수
 static void *find_fit(size_t asize)
 {
+    char *cur_listp = heap_listp;
 
+    while (GET(HDRP(cur_listp)) != PACK(0, 1)) {
+        size_t cur_size = GET_SIZE(HDRP(cur_listp));
+        size_t cur_alloc = GET_ALLOC(HDRP(cur_listp));
+        if (!cur_alloc && cur_size >= asize) {
+            return cur_listp;
+        }
+
+        cur_listp = NEXT_BLKP(cur_listp);
+    }
+
+    return NULL;
 }
 
 // 연습문제 9.9, 블록을 실제로 배치하는 함수
 // 요청한 블록을 가용 블록의 시작 부분에 배치해야 하며, 남은 부분의 크기가 최소 블록 크기와 같거나 큰 경우에만 분할
-static void *place(void *bp, size_t asize)
+static void place(void *bp, size_t asize)
 {
+    size_t free_size = GET_SIZE(HDRP(bp));
 
+    // 최소 가용 크기: 8바이트(더블 워드)
+    if (free_size-asize >= 2*DSIZE) {
+        PUT(HDRP(bp), PACK(asize, 1));
+        PUT(FTRP(bp), PACK(asize, 1));
+        bp = NEXT_BLKP(bp);
+        PUT(HDRP(bp), PACK(free_size-asize, 0));
+        PUT(FTRP(bp), PACK(free_size-asize, 0));
+    }
+
+    else {
+        PUT(HDRP(bp), PACK(free_size, 1));
+        PUT(FTRP(bp), PACK(free_size, 1));
+    }
 }
 
 /* 
@@ -162,11 +236,32 @@ void *mm_malloc(size_t size)
     // int newsize = ALIGN(size + SIZE_T_SIZE);
     // void *p = mem_sbrk(newsize);
     // if (p == (void *)-1)
-	// return NULL;
+    // return NULL;
     // else {
     //     *(size_t *)p = size;
     //     return (void *)((char *)p + SIZE_T_SIZE);
     // }
+
+    size_t asize = get_asize(size);
+    size_t extendsize;
+    char *bp;
+
+    if (size == 0) {
+        return NULL;
+    }
+
+    if ((bp = find_fit(asize)) != NULL) {
+        place(bp, asize);
+        return bp;
+    }
+
+    extendsize = MAX(asize, CHUNKSIZE);
+    if ((bp = extend_heap(extendsize / WSIZE)) == NULL) {
+        return NULL;
+    }
+
+    place(bp, asize);
+    return bp;
 }
 
 /*
@@ -176,29 +271,19 @@ void *mm_realloc(void *ptr, size_t size)
 {
     void *oldptr = ptr;
     void *newptr;
-    size_t copySize;
+
+    size_t oldSize = GET_SIZE(HDRP(ptr));
+    size_t asize = get_asize(size);
+    size_t copySize = (oldSize < asize) ? oldSize : asize;
+    copySize -= DSIZE;
     
     newptr = mm_malloc(size);
     if (newptr == NULL)
       return NULL;
-    copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
-    if (size < copySize)
-      copySize = size;
+    // copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
+    // if (size < copySize)
+    //   copySize = size;
     memcpy(newptr, oldptr, copySize);
     mm_free(oldptr);
     return newptr;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
