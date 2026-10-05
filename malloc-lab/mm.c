@@ -24,11 +24,11 @@
  ********************************************************/
 team_t team = {
     /* Team name */
-    "ateam",
+    "5team",
     /* First member's full name */
-    "Harry Bovik",
+    "Mingi Kim",
     /* First member's email address */
-    "bovik@cs.cmu.edu",
+    "alsrl6710@gmail.com",
     /* Second member's full name (leave blank if none) */
     "",
     /* Second member's email address (leave blank if none) */
@@ -41,15 +41,67 @@ team_t team = {
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
 
-
+// F9.43 macros
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
+
+#define WSIZE             4
+#define DSIZE             8
+#define CHUNKSIZE         (1<<12)
+
+#define MAX(x, y)         ((x) > (y) ? (x) : (y))
+
+#define PACK(size, alloc) ((size) | (alloc))
+
+#define GET(p)            (*(unsigned int *)(p))
+#define PUT(p, val)       (*(unsigned int *)(p) = val)
+
+#define GET_SIZE(p)       (GET(p) & ~0x7)
+#define GET_ALLOC(p)      (GET(p) & 0x1)
+
+#define HDRP(bp)          ((char *)(bp) - WSIZE)
+#define FTRP(bp)          ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
+
+#define NEXT_BLKP(bp)     ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
+#define PREV_BLKP(bp)     ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
+
+// 824페이지에서 나온 "한 개의 정적(static) 전역변수"
+static char *heap_listp = 0;
 
 /* 
  * mm_init - initialize the malloc package.
  */
+// F9.44
+// 묵시적 가용 리스트의 불변하는 형식 초기화
 int mm_init(void)
 {
+    if (heap_listp = mem_sbrk(4*WSIZE) == (void*)-1) {
+        return -1;
+    }
+    PUT(heap_listp, 0);
+    PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));
+    PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
+    PUT(heap_listp + (3*WSIZE), PACK(0, 1));
+    heap_listp += (2*WSIZE);
+
+    if (extend_heap(CHUNKSIZE / WSIZE) == NULL) {
+        return -1;
+    }
     return 0;
+}
+
+// F9.45
+// 86째 줄에서 가용 공간을 늘리려고 호출하는 그 함수
+static void *extend_heap(size_t words)
+{
+    
+}
+
+/*
+ * mm_free - Freeing a block does nothing.
+ */
+void mm_free(void *ptr)
+{
+    
 }
 
 /* 
@@ -66,13 +118,6 @@ void *mm_malloc(size_t size)
         *(size_t *)p = size;
         return (void *)((char *)p + SIZE_T_SIZE);
     }
-}
-
-/*
- * mm_free - Freeing a block does nothing.
- */
-void mm_free(void *ptr)
-{
 }
 
 /*
