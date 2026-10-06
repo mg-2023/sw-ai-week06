@@ -77,6 +77,8 @@ team_t team = {
 
 // 824페이지에서 나온 "한 개의 정적(static) 전역변수"
 static char *heap_listp = 0;
+// next fit 정책용 탐색 포인터
+static char *rover = 0;
 
 // asize를 구하는 함수
 size_t get_asize(size_t size) {
@@ -126,6 +128,10 @@ static void *coalesce(void *bp)
         bp = PREV_BLKP(bp);
     }
 
+    if (rover > (char*)bp && rover < (char*)NEXT_BLKP(bp)) {
+        rover = bp;
+    }
+
     return bp;
 }
 
@@ -163,6 +169,8 @@ int mm_init(void)
     PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
     PUT(heap_listp + (3*WSIZE), PACK(0, 1));
     heap_listp += (2*WSIZE);
+    rover = heap_listp;
+    // fprintf(stderr, "prologue header: %08x, prologue footer: %08x\n", GET(HDRP(prologue)), GET(FTRP(prologue)));
 
     if (extend_heap(CHUNKSIZE / WSIZE) == NULL) {
         return -1;
@@ -186,11 +194,11 @@ void mm_free(void *bp)
 }
 
 // 연습문제 9.8, first fit 검색을 수행하는 함수
-static void *find_fit(size_t asize)
+static void *first_fit(size_t asize)
 {
     char *cur_listp = heap_listp;
 
-    while (GET(HDRP(cur_listp)) != PACK(0, 1)) {
+    while (GET(HDRP(cur_listp)) != 0x1) {
         size_t cur_size = GET_SIZE(HDRP(cur_listp));
         size_t cur_alloc = GET_ALLOC(HDRP(cur_listp));
         if (!cur_alloc && cur_size >= asize) {
@@ -203,13 +211,57 @@ static void *find_fit(size_t asize)
     return NULL;
 }
 
+// 자체구현 next fit 함수
+static void *next_fit(size_t asize)
+{
+    char *cur_listp = rover;
+    do {
+        cur_listp = NEXT_BLKP(cur_listp);
+        if (GET(HDRP(cur_listp)) == 0x1) {
+            cur_listp = heap_listp;
+            continue;
+        }
+
+        size_t cur_size = GET_SIZE(HDRP(cur_listp));
+        size_t cur_alloc = GET_ALLOC(HDRP(cur_listp));
+        if (!cur_alloc && cur_size >= asize) {
+            rover = cur_listp;
+            return cur_listp;
+        }
+    } while(cur_listp != rover);
+
+    return NULL;
+}
+
+// 자체구현 best fit 함수
+static void *best_fit(size_t asize) {
+    char *cur_listp = heap_listp;
+    char *best_blkp = NULL;
+    size_t min_diff = __INT32_MAX__;
+
+    while (GET(HDRP(cur_listp)) != 0x1) {
+        size_t cur_size = GET_SIZE(HDRP(cur_listp));
+        size_t cur_alloc = GET_ALLOC(HDRP(cur_listp));
+        if (!cur_alloc && cur_size >= asize) {
+            if ((cur_size - asize) < min_diff) {
+                best_blkp = cur_listp;
+                min_diff = cur_size - asize;
+            }
+        }
+
+        cur_listp = NEXT_BLKP(cur_listp);
+    }
+
+    return best_blkp;
+}
+
 // 연습문제 9.9, 블록을 실제로 배치하는 함수
 // 요청한 블록을 가용 블록의 시작 부분에 배치해야 하며, 남은 부분의 크기가 최소 블록 크기와 같거나 큰 경우에만 분할
 static void place(void *bp, size_t asize)
 {
     size_t free_size = GET_SIZE(HDRP(bp));
 
-    // 최소 가용 크기: 8바이트(더블 워드)
+    // 최소 가용 크기: 16바이트(더블 워드*2)
     if (free_size-asize >= 2*DSIZE) {
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
@@ -245,6 +297,12 @@ void *mm_malloc(size_t size)
     size_t asize = get_asize(size);
     size_t extendsize;
     char *bp;
+
+    // 블록 탐색 메커니즘 세분화용 함수 포인터
+    static void* (*find_fit) (size_t);
+    // find_fit = first_fit;
+    // find_fit = next_fit;
+    find_fit = best_fit;
 
     if (size == 0) {
         return NULL;
