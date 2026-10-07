@@ -232,7 +232,7 @@ void mm_free(void *bp)
 
 // 연습문제 9.8, first fit 검색을 수행하는 함수
 // next-fit과 best-fit은 명시적 방식에서는 필요 없다고 함
-static void *find_fit(size_t asize)
+static void *first_fit(size_t asize)
 {
     char *cur_listp = heap_listp;
     while (1) {
@@ -246,6 +246,31 @@ static void *find_fit(size_t asize)
             return cur_listp;
         }
     }
+}
+
+// 자체구현 best fit 함수
+static void *best_fit(size_t asize)
+{
+    char *cur_listp = heap_listp;
+    char *best_blkp = NULL;
+    size_t diff = __SIZE_MAX__;
+    size_t csize = 0;
+    while (1) {
+        cur_listp = GET_SUCC(cur_listp);
+        if (cur_listp == NULL) {
+            break;
+        }
+
+        csize = GET_SIZE(HDRP(cur_listp));
+        if (csize >= asize) {
+            if (diff > (csize-asize)) {
+                diff = csize-asize;
+                best_blkp = cur_listp;
+            }
+        }
+    }
+    
+    return best_blkp;
 }
 
 // 연습문제 9.9, 블록을 실제로 배치하는 함수
@@ -292,6 +317,10 @@ void *mm_malloc(size_t size)
     size_t asize = get_asize(size);
     size_t extendsize;
     char *bp;
+
+    static void* (*find_fit) (size_t);
+    // find_fit = first_fit;
+    find_fit = best_fit;
 
     if (size == 0) {
         return NULL;

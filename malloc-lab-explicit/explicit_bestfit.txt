@@ -1,0 +1,21 @@
+Team Name:5team
+Member 1 :Mingi Kim:alsrl6710@gmail.com
+Using default tracefiles in ./traces/
+Measuring performance with gettimeofday().
+
+Results for mm malloc:
+trace  valid  util     ops      secs  Kops
+ 0       yes   99%    5694  0.000089 63763
+ 1       yes   99%    5848  0.000108 53948
+ 2       yes   99%    6648  0.000103 64606
+ 3       yes  100%    5380  0.000088 60998
+ 4       yes   66%   14400  0.000054266667
+ 5       yes   96%    4800  0.001561  3076
+ 6       yes   95%    4800  0.001553  3092
+ 7       yes   55%   12000  0.005795  2071
+ 8       yes   51%   24000  0.020176  1190
+ 9       yes   31%   14401  0.021607   667
+10       yes   30%   14401  0.000375 38392
+Total          75%  112372  0.051509  2182
+
+Perf index = 45 (util) + 40 (thru) = 85/100
