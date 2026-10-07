@@ -314,6 +314,8 @@ void *mm_malloc(size_t size)
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
  */
+
+// mm_malloc과 mm_free가 구현되었으니 이 함수들로 잘 조정하면 됨
 void *mm_realloc(void *ptr, size_t size)
 {
     void *oldptr = ptr;
@@ -321,16 +323,31 @@ void *mm_realloc(void *ptr, size_t size)
 
     size_t oldSize = GET_SIZE(HDRP(ptr));
     size_t asize = get_asize(size);
-    size_t copySize = (oldSize < asize) ? oldSize : asize;
-    copySize -= DSIZE;
+    if (oldSize == asize) {
+        return oldptr;
+    }
+
+    else if (oldSize > asize) {
+        return oldptr;
+    }
+
+    else {
+        size_t copySize = (oldSize < asize) ? oldSize : asize;
+        copySize -= DSIZE;
+        newptr = mm_malloc(asize);
+        memcpy(newptr, oldptr, copySize);
+        mm_free(oldptr);
+        return newptr;
+    }
+
     
-    newptr = mm_malloc(size);
-    if (newptr == NULL)
-      return NULL;
-    // copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
-    // if (size < copySize)
-    //   copySize = size;
-    memcpy(newptr, oldptr, copySize);
-    mm_free(oldptr);
+    // newptr = mm_malloc(size);
+    // if (newptr == NULL)
+    //   return NULL;
+    // // copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
+    // // if (size < copySize)
+    // //   copySize = size;
+    // memcpy(newptr, oldptr, copySize);
+    // mm_free(oldptr);
     return newptr;
 }
