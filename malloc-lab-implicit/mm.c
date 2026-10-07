@@ -170,7 +170,6 @@ int mm_init(void)
     PUT(heap_listp + (3*WSIZE), PACK(0, 1));
     heap_listp += (2*WSIZE);
     rover = heap_listp;
-    // fprintf(stderr, "prologue header: %08x, prologue footer: %08x\n", GET(HDRP(prologue)), GET(FTRP(prologue)));
 
     if (extend_heap(CHUNKSIZE / WSIZE) == NULL) {
         return -1;

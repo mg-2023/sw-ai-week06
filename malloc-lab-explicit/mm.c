@@ -70,9 +70,18 @@ team_t team = {
 // 블록 포인터로부터 풋터 포인터를 구함
 #define FTRP(bp)          ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
 // 블록 포인터로부터 pred 포인터를 구함
-#define PRED(bp)         ((char *)(bp))
+#define PRED(bp)          ((char *)(bp))
 // 블록 포인터로부터 succ 포인터를 구함
-#define SUCC(bp)         ((char *)(bp) + WSIZE)
+#define SUCC(bp)          ((char *)(bp) + WSIZE)
+
+// 이 블록 포인터의 pred 위치에 있는 값을 가져옴
+#define GET_PRED(bp)      ((char*)GET(PRED(bp)))
+// 이 블록 포인터의 pred 위치에 값을 씀
+#define PUT_PRED(bp, val) PUT(PRED(bp), val)
+// 이 블록 포인터의 succ 위치에 있는 값을 가져옴
+#define GET_SUCC(bp)      ((char*)GET(SUCC(bp)))
+// 이 블록 포인터의 succ 위치에 값을 씀
+#define PUT_SUCC(bp, val) PUT(SUCC(bp), val)  
 
 // 블록 포인터로부터 다음 블록의 위치를 구함
 #define NEXT_BLKP(bp)     ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
@@ -81,11 +90,10 @@ team_t team = {
 
 // 824페이지에서 나온 "한 개의 정적(static) 전역변수"
 static char *heap_listp = 0;
-// next fit 정책용 탐색 포인터
-static char *rover = 0;
 
 // asize를 구하는 함수
-size_t get_asize(size_t size) {
+size_t get_asize(size_t size)
+{
     size_t asize;
     if (size <= DSIZE) {
         asize = 2*DSIZE;
@@ -98,44 +106,67 @@ size_t get_asize(size_t size) {
     return asize;
 }
 
-// 경계태그 연결 함수, 사실상 묵시적 가용 리스트 방식의 하이라이트
+// coalesce의 헬퍼 함수들
+
+// 가용으로 표시하기 전 or 병합되기 전 가용 리스트에서 제거
+static void remove_free(void *bp)
+{
+    PUT_SUCC(GET_PRED(bp), GET(SUCC(bp)));
+    if (GET_SUCC(bp) != NULL) {
+        PUT_PRED(GET_SUCC(bp), GET(PRED(bp)));
+    }
+}
+
+// 방금 막 생긴 가용 블록을 센티넬 바로 뒤에 위치하게 함 (LIFO 구조 엄수)
+static void insert_free(void *bp)
+{
+    char *first = GET_SUCC(heap_listp);
+    PUT_SUCC(bp, (unsigned int)first);
+    PUT_PRED(bp, (unsigned int)heap_listp);
+    PUT_SUCC(heap_listp, (unsigned int)bp);
+    if (first != NULL) {
+        PUT_PRED(first, (unsigned int)bp);
+    }
+}
+
+// 경계태그 연결 함수
+// pred와 succ을 연결하는 작업은 이 함수에서만 함
 static void *coalesce(void *bp)
 {
-    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
-    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+    size_t c_size = GET_SIZE(HDRP(bp));
+    size_t p_size = GET_SIZE(HDRP(PREV_BLKP(bp)));
+    size_t n_size = GET_SIZE(HDRP(NEXT_BLKP(bp)));
 
-    size_t size = GET_SIZE(HDRP(bp));
-    size_t prev_size = GET_SIZE(HDRP(PREV_BLKP(bp)));
-    size_t next_size = GET_SIZE(HDRP(NEXT_BLKP(bp)));
+    size_t p_alloc = GET_ALLOC(HDRP(PREV_BLKP(bp)));
+    size_t n_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
 
-    if (prev_alloc && next_alloc) {
-        return bp;
+    if (p_alloc && n_alloc) {
+
     }
 
-    else if (prev_alloc && !next_alloc) {
-        size += next_size;
-        PUT(HDRP(bp), PACK(size, 0));
-        PUT(FTRP(bp), PACK(size, 0));
+    else if (p_alloc && !n_alloc) {
+        remove_free(NEXT_BLKP(bp));
+        PUT(HDRP(bp), PACK(c_size+n_size, 0));
+        PUT(FTRP(bp), PACK(c_size+n_size, 0));
     }
-    
-    else if (!prev_alloc && next_alloc) {
-        size += prev_size;
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        PUT(FTRP(bp), PACK(size, 0));
+
+    else if (!p_alloc && n_alloc) {
+        remove_free(PREV_BLKP(bp));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(p_size+c_size, 0));
+        PUT(FTRP(bp), PACK(p_size+c_size, 0));
         bp = PREV_BLKP(bp);
     }
 
-    else {
-        size += (prev_size + next_size);
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+    else if (!p_alloc && !n_alloc) {
+        remove_free(PREV_BLKP(bp));
+        remove_free(NEXT_BLKP(bp));
+
+        PUT(HDRP(PREV_BLKP(bp)), PACK(p_size+c_size+n_size, 0));
+        PUT(FTRP(NEXT_BLKP(bp)), PACK(p_size+c_size+n_size, 0));
         bp = PREV_BLKP(bp);
     }
 
-    if (rover > (char*)bp && rover < (char*)NEXT_BLKP(bp)) {
-        rover = bp;
-    }
-
+    insert_free(bp);
     return bp;
 }
 
@@ -146,7 +177,7 @@ static void *extend_heap(size_t words)
     char *bp;
     size_t size;
 
-    size = (words%2) ? (words+1) * WSIZE : words * WSIZE;
+    size = (words%2) ? ((words+1) * WSIZE) : (words * WSIZE);
     if ((long)(bp = mem_sbrk(size)) == -1L) {
         return NULL;
     }
@@ -154,7 +185,7 @@ static void *extend_heap(size_t words)
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
-    
+
     return coalesce(bp);
 }
 
@@ -162,23 +193,25 @@ static void *extend_heap(size_t words)
  * mm_init - initialize the malloc package.
  */
 // F9.44
-// 묵시적 가용 리스트의 불변하는 형식 초기화
+// 명시적 가용 리스트의 불변하는 형식 초기화
 int mm_init(void)
 {
-    if ((heap_listp = mem_sbrk(4*WSIZE)) == (void*)-1) {
+    if ((heap_listp = mem_sbrk(6*WSIZE)) == (void*)-1) {
         return -1;
     }
-    PUT(heap_listp, 0);
-    PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));
-    PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
-    PUT(heap_listp + (3*WSIZE), PACK(0, 1));
-    heap_listp += (2*WSIZE);
-    rover = heap_listp;
-    // fprintf(stderr, "prologue header: %08x, prologue footer: %08x\n", GET(HDRP(prologue)), GET(FTRP(prologue)));
 
+    PUT(heap_listp, 0);
+    PUT(heap_listp + (1*WSIZE), PACK(2*DSIZE, 1));
+    PUT(heap_listp + (2*WSIZE), 0);
+    PUT(heap_listp + (3*WSIZE), 0);
+    PUT(heap_listp + (4*WSIZE), PACK(2*DSIZE, 1));
+    PUT(heap_listp + (5*WSIZE), PACK(0, 1));
+
+    heap_listp += (2*WSIZE);
     if (extend_heap(CHUNKSIZE / WSIZE) == NULL) {
         return -1;
     }
+
     return 0;
 }
 
@@ -198,85 +231,43 @@ void mm_free(void *bp)
 }
 
 // 연습문제 9.8, first fit 검색을 수행하는 함수
-static void *first_fit(size_t asize)
+// next-fit과 best-fit은 명시적 방식에서는 필요 없다고 함
+static void *find_fit(size_t asize)
 {
     char *cur_listp = heap_listp;
+    while (1) {
+        cur_listp = GET_SUCC(cur_listp);
+        if (cur_listp == NULL) {
+            return NULL;
+        }
 
-    while (GET(HDRP(cur_listp)) != 0x1) {
-        size_t cur_size = GET_SIZE(HDRP(cur_listp));
-        size_t cur_alloc = GET_ALLOC(HDRP(cur_listp));
-        if (!cur_alloc && cur_size >= asize) {
+        size_t csize = GET_SIZE(HDRP(cur_listp));
+        if (csize >= asize) {
             return cur_listp;
         }
-
-        cur_listp = NEXT_BLKP(cur_listp);
     }
-
-    return NULL;
-}
-
-// 자체구현 next fit 함수
-static void *next_fit(size_t asize)
-{
-    char *cur_listp = rover;
-    do {
-        cur_listp = NEXT_BLKP(cur_listp);
-        if (GET(HDRP(cur_listp)) == 0x1) {
-            cur_listp = heap_listp;
-            continue;
-        }
-
-        size_t cur_size = GET_SIZE(HDRP(cur_listp));
-        size_t cur_alloc = GET_ALLOC(HDRP(cur_listp));
-        if (!cur_alloc && cur_size >= asize) {
-            rover = cur_listp;
-            return cur_listp;
-        }
-    } while(cur_listp != rover);
-
-    return NULL;
-}
-
-// 자체구현 best fit 함수
-static void *best_fit(size_t asize) {
-    char *cur_listp = heap_listp;
-    char *best_blkp = NULL;
-    size_t min_diff = __INT32_MAX__;
-
-    while (GET(HDRP(cur_listp)) != 0x1) {
-        size_t cur_size = GET_SIZE(HDRP(cur_listp));
-        size_t cur_alloc = GET_ALLOC(HDRP(cur_listp));
-        if (!cur_alloc && cur_size >= asize) {
-            if ((cur_size - asize) < min_diff) {
-                best_blkp = cur_listp;
-                min_diff = cur_size - asize;
-            }
-        }
-
-        cur_listp = NEXT_BLKP(cur_listp);
-    }
-
-    return best_blkp;
 }
 
 // 연습문제 9.9, 블록을 실제로 배치하는 함수
 // 요청한 블록을 가용 블록의 시작 부분에 배치해야 하며, 남은 부분의 크기가 최소 블록 크기와 같거나 큰 경우에만 분할
 static void place(void *bp, size_t asize)
 {
-    size_t free_size = GET_SIZE(HDRP(bp));
+    remove_free(bp);
 
-    // 최소 가용 크기: 16바이트(더블 워드*2)
-    if (free_size-asize >= 2*DSIZE) {
+    size_t csize = GET_SIZE(HDRP(bp));
+    if (csize-asize >= 2*DSIZE) {
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
         bp = NEXT_BLKP(bp);
-        PUT(HDRP(bp), PACK(free_size-asize, 0));
-        PUT(FTRP(bp), PACK(free_size-asize, 0));
+        PUT(HDRP(bp), PACK(csize-asize, 0));
+        PUT(FTRP(bp), PACK(csize-asize, 0));
+
+        insert_free(bp);
     }
 
     else {
-        PUT(HDRP(bp), PACK(free_size, 1));
-        PUT(FTRP(bp), PACK(free_size, 1));
+        PUT(HDRP(bp), PACK(csize, 1));
+        PUT(FTRP(bp), PACK(csize, 1));
     }
 }
 
@@ -301,12 +292,6 @@ void *mm_malloc(size_t size)
     size_t asize = get_asize(size);
     size_t extendsize;
     char *bp;
-
-    // 블록 탐색 메커니즘 세분화용 함수 포인터
-    static void* (*find_fit) (size_t);
-    // find_fit = first_fit;
-    // find_fit = next_fit;
-    find_fit = best_fit;
 
     if (size == 0) {
         return NULL;
